@@ -75,12 +75,8 @@ public class eastmoneyProcessor implements PageProcessor
 		if(flagCategory.size()==1 && flagCategory.get(0).intValue()==1)
 		{
 			Date recentDate = null;
-			//获取  系统日期 、系统年份
 			SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
-			String todaySysDate=df.format(new Date());
-			String todayYear=todaySysDate.substring(0, 4);
-
-			//取出数据库中离今天最近的日期 
+			//取出数据库中离今天最近的日期 recentDate
 			try {
 				rs = stmt.executeQuery("SELECT PastDate FROM datetemp2 WHERE StockID = '"+stockID+"';") ;
 				while(rs.next())
@@ -91,7 +87,6 @@ public class eastmoneyProcessor implements PageProcessor
 			} catch (SQLException | ParseException e1) {
 				e1.printStackTrace();
 			}
-
 			//从网页中抽取 read review title publish_date 四个指标
 			List<String> articleh = page.getHtml().xpath("//div[@id='articlelistnew']//div[@class='articleh']").all();
 			String readVolume;
@@ -99,8 +94,11 @@ public class eastmoneyProcessor implements PageProcessor
 			String title;
 			String publish_date;
 			int count=0;
+			int count2=0;
+			Date publishDate=null;
 			for(int i=0; i<articleh.size();i++)
 			{
+				count2=i;
 				String content=articleh.get(i);
 				String check=Html.create(content).xpath("//div[@class='articleh']//span[@class='l3']/em/text()").toString();  //提取链接
 				if(check!=null)
@@ -114,22 +112,15 @@ public class eastmoneyProcessor implements PageProcessor
 					publish_date=Html.create(content).xpath("//div[@class='articleh']//span[@class='l6']/text()").toString();  //提取链接
 
 					//为publishDate选择年份
-					String publish_date2=todayYear+"-"+publish_date;
-					Date publishDate=null;
 					try {
-						publishDate = df.parse(publish_date2);
-					} catch (ParseException e) {
-						e.printStackTrace();
+						publishDate = OperatePublishDate(publish_date,stmt);
+					} catch (ParseException e1) {
+						// TODO Auto-generated catch block
+						e1.printStackTrace();
 					}
 
 					if(publishDate.getTime() > recentDate.getTime())
 					{
-
-						try {
-							publishDate = OperatePublishDate(publish_date,stmt);
-						} catch (ParseException e) {
-							e.printStackTrace();
-						}
 						//将爬取的数据传给MySQLPipeline
 						ssb.setStockID(stockID);
 						ssb.setReadVolume(readVolume);
@@ -141,23 +132,9 @@ public class eastmoneyProcessor implements PageProcessor
 						String stringDate=year+"-"+month+"-"+day;
 						ssb.setPublish_date(stringDate);
 						page.putField(""+count,ssb);
-						if(i==articleh.size()-1)//如果本页爬取完了  日期还是小
-						{
-							//递增f_的代码块,如果到了最后一页就不增加了
-							String string=page.getUrl().toString();
-							String left=string.substring(0, 40);
-							String right=string.substring(string.length()-5);
-							String center=string.substring(40);
-							String[] numString=new String[2];
-							numString=center.split("\\.");
-							int currentPageNum=Integer.parseInt(numString[0]);//当前page的f_数目
-							currentPageNum++;
-							String num=currentPageNum+"";
-							page.addTargetRequest(left+num+right);
-						}
 						count++;
 					}else//将比recentDate后一天（明天）的日期的flag=0置为flag=1
-						//将datetemp2表中的日期跟新为新的最近日期
+						//将datetemp2表中的日期更新为新的最近日期
 					{
 						String stringDate = null;
 						//将比recentDate后一天（明天）的日期的flag=0置为flag=1
@@ -172,9 +149,6 @@ public class eastmoneyProcessor implements PageProcessor
 						} catch (SQLException e) {
 							e.printStackTrace();
 						}
-
-
-
 						//将datetemp2表中的日期跟新为新的最近日期
 						String stringRecentDate = null;
 						try {
@@ -192,6 +166,20 @@ public class eastmoneyProcessor implements PageProcessor
 						break;
 					}
 				}
+			}
+			if(count2==articleh.size()-1 && publishDate.getTime() > recentDate.getTime())//如果本页爬取完了  日期还是小
+			{
+				//递增f_的代码块,如果到了最后一页就不增加了
+				String string=page.getUrl().toString();
+				String left=string.substring(0, 40);
+				String right=string.substring(string.length()-5);
+				String center=string.substring(40);
+				String[] numString=new String[2];
+				numString=center.split("\\.");
+				int currentPageNum=Integer.parseInt(numString[0]);//当前page的f_数目
+				currentPageNum++;
+				String num=currentPageNum+"";
+				page.addTargetRequest(left+num+right);
 			}
 		}
 		//常规回溯爬取       flag的种类有1、0     或者 flag的种类为0      或者flag为null时进行常规回溯爬取
@@ -397,7 +385,7 @@ public class eastmoneyProcessor implements PageProcessor
 		}
 		return publishDate;
 	}
-	
+
 	/**
 	 * OperatePublishDateYear函数的子函数<br>
 	 * 确定publish_date的年份
@@ -567,7 +555,7 @@ public class eastmoneyProcessor implements PageProcessor
 		return publishDate;
 	}
 
-	
+
 	/**
 	 * 新旧日期更迭，当新日期出现时，插入datetemp表中新日期（flag=0），旧日期的相应flag字段置1
 	 * @param publishDate
@@ -617,8 +605,36 @@ public class eastmoneyProcessor implements PageProcessor
 	@SuppressWarnings("deprecation")
 	private void FillInRestDate(Date publishDate,Date publishDateOld,Statement stmt)  
 	{
+		ResultSet rs = null;
+		int publishDateFlag=3;
+		int publishDateOldFlag =4;
+
+		int year=publishDate.getYear()+1900;
+		int month=publishDate.getMonth()+1;
+		int day=publishDate.getDate();
+		int year2=publishDateOld.getYear()+1900;
+		int month2=publishDateOld.getMonth()+1;
+		int day2=publishDateOld.getDate();
+		
+		try {
+			rs = stmt.executeQuery("SELECT Flag FROM datetemp WHERE PastDate = '"+year+"-"+month+"-"+day+"' AND StockID = '"+stockID+"';") ;
+			while(rs.next())
+			{
+				publishDateFlag=rs.getInt("Flag");
+			}
+			rs = stmt.executeQuery("SELECT Flag FROM datetemp WHERE PastDate = '"+year2+"-"+month2+"-"+day2+"' AND StockID = '"+stockID+"';") ;
+			while(rs.next())
+			{
+				publishDateOldFlag=rs.getInt("Flag");
+			}
+		} catch (SQLException e2) {
+			// TODO Auto-generated catch block
+			e2.printStackTrace();
+		}
+
 		//如果新旧日期的年份不同，说明到了新的一年，过去的一年有些日期没有人发评论，所以要将日期填满，以防下一年年份变成今年的年份
-		if(publishDate.getYear() < publishDateOld.getYear())
+		//还要满足新旧日期在datetemp表中的Flag都是1，以防这种情况2017-1-3  2016-12-28  2017-1-1（2016-1-1），使得DeleteExceptionDate与该函数冲突
+		if(publishDate.getYear() < publishDateOld.getYear() && publishDateOldFlag==publishDateFlag )
 		{
 			int oldYear=publishDateOld.getYear()+1900;
 
@@ -650,7 +666,7 @@ public class eastmoneyProcessor implements PageProcessor
 			Long oneDay = 1000 * 60 * 60 * 24l;  
 			Long time = startTIme; 
 
-			ResultSet rs = null;
+
 			while (time <= endTime) 
 			{  
 				Date d = new Date(time); 
@@ -680,14 +696,13 @@ public class eastmoneyProcessor implements PageProcessor
 
 				time += oneDay;  
 			} 
-
-			if(rs!= null)
-				try {
-					rs.close();
-				} catch (SQLException e) {
-					e.printStackTrace();
-				}
 		}
+		if(rs!= null)
+			try {
+				rs.close();
+			} catch (SQLException e) {
+				e.printStackTrace();
+			}
 	}
 
 	public static void main(String[] args) throws ClassNotFoundException, SQLException {
